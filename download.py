@@ -13,13 +13,20 @@ from yt_dlp.utils import DownloadError, ExtractorError
 
 def print_usage():
     """Print usage information"""
-    print("Usage: python download.py <youtube_url> <format>")
+    print("Usage: python download.py <youtube_url> <format> [--chapters | --playlist]")
     print("\nParameters:")
-    print("  <youtube_url>  - The YouTube video URL")
+    print("  <youtube_url>  - The YouTube video or playlist URL")
     print("  <format>       - Either 'mp3' (audio) or 'mp4' (video)")
+    print("  --chapters     - Optional. Split the download into one file per")
+    print("                   YouTube chapter (named videotitle_chapter.mp3/mp4)")
+    print("  --playlist     - Optional. Download every video in the playlist into")
+    print("                   a folder named after the playlist. Each file is")
+    print("                   prefixed with its 3-digit track number (e.g. 001title.mp3)")
     print("\nExamples:")
     print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp4")
     print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp3")
+    print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp3 --chapters")
+    print("  python download.py 'https://www.youtube.com/playlist?list=PLxxxx' mp3 --playlist")
 
 
 def is_valid_youtube_url(url):
@@ -32,6 +39,8 @@ def is_valid_youtube_url(url):
         r'(?:https?://)?(?:www\.)?youtu\.be/[\w-]+',
         r'(?:https?://)?(?:www\.)?youtube\.com/embed/[\w-]+',
         r'(?:https?://)?(?:www\.)?youtube\.com/v/[\w-]+',
+        r'(?:https?://)?(?:www\.)?youtube\.com/playlist\?list=[\w-]+',
+        r'(?:https?://)?music\.youtube\.com/playlist\?list=[\w-]+',
     ]
     
     for pattern in youtube_patterns:
@@ -43,30 +52,43 @@ def is_valid_youtube_url(url):
 def validate_arguments():
     """
     Validate command-line arguments
-    Returns: (url, format) tuple if valid, None if invalid
+    Returns: (url, format, split_chapters, playlist) tuple if valid, None if invalid
     """
-    # Check argument count
-    if len(sys.argv) != 3:
+    # Check argument count (url + format + up to one optional flag)
+    if len(sys.argv) not in (3, 4):
         print("Error: Invalid number of arguments")
         print_usage()
         return None
-    
+
     url = sys.argv[1]
     format_type = sys.argv[2].lower()
-    
+    split_chapters = False
+    playlist = False
+
+    if len(sys.argv) == 4:
+        flag = sys.argv[3].lower()
+        if flag == '--chapters':
+            split_chapters = True
+        elif flag == '--playlist':
+            playlist = True
+        else:
+            print(f"Error: Unknown option '{sys.argv[3]}'")
+            print_usage()
+            return None
+
     # Validate URL
     if not is_valid_youtube_url(url):
         print(f"Error: Invalid YouTube URL: {url}")
         print("Please provide a valid YouTube URL")
         return None
-    
+
     # Validate format
     if format_type not in ['mp3', 'mp4']:
         print(f"Error: Invalid format '{format_type}'")
         print("Format must be either 'mp3' or 'mp4'")
         return None
-    
-    return url, format_type
+
+    return url, format_type, split_chapters, playlist
 
 
 def sanitize_filename(filename, max_length=200):
@@ -154,27 +176,33 @@ def check_ffmpeg():
     return shutil.which('ffmpeg') is not None
 
 
-def download_video(url, format_type):
+def download_video(url, format_type, split_chapters=False, playlist=False):
     """
     Download YouTube video in specified format
-    
+
     Args:
-        url: YouTube video URL
+        url: YouTube video URL (or playlist URL when playlist=True)
         format_type: 'mp3' or 'mp4'
-    
+        split_chapters: If True, split output into one file per YouTube chapter
+        playlist: If True, download every video in the playlist into a folder
+                  named after the playlist; files are prefixed with a 3-digit
+                  track number (e.g. 001<title>.<ext>)
+
     Returns:
         True if successful, False otherwise
     """
-    # Check for ffmpeg if MP3 format requested
-    if format_type == 'mp3' and not check_ffmpeg():
+    # ffmpeg is required for MP3 conversion and for chapter splitting
+    needs_ffmpeg = format_type == 'mp3' or split_chapters
+    if needs_ffmpeg and not check_ffmpeg():
         print("✗ Error: ffmpeg is not installed or not in PATH")
-        print("\nffmpeg is required for MP3 conversion.")
+        reason = "MP3 conversion" if format_type == 'mp3' else "chapter splitting"
+        print(f"\nffmpeg is required for {reason}.")
         print("\nInstall instructions:")
         print("  macOS:    brew install ffmpeg")
         print("  Ubuntu:   sudo apt install ffmpeg")
         print("  Windows:  Download from https://ffmpeg.org/download.html")
         return False
-    
+
     # Base options for yt-dlp
     ydl_opts = {
         'progress_hooks': [progress_hook],
@@ -186,8 +214,10 @@ def download_video(url, format_type):
         # Help avoid 403 errors
         'nocheckcertificate': True,
         'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+        # Only follow playlist links when the user explicitly opts in with --playlist
+        'noplaylist': not playlist,
     }
-    
+
     # Configure options based on format
     if format_type == 'mp4':
         # For MP4: download best video with audio
@@ -196,54 +226,169 @@ def download_video(url, format_type):
             'merge_output_format': 'mp4',
         })
         print("Downloading video in MP4 format...")
+        postprocessors = []
     else:  # mp3
         # For MP3: extract audio and convert
-        ydl_opts.update({
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        })
+        ydl_opts['format'] = 'bestaudio/best'
+        postprocessors = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
         print("Extracting audio in MP3 format...")
-    
+
+    if split_chapters:
+        # Run after extraction/merge so we split the final mp3/mp4
+        postprocessors.append({'key': 'FFmpegSplitChapters'})
+        # Also grab the video thumbnail and convert it to PNG so it can live
+        # alongside the chapter files.
+        postprocessors.append({'key': 'FFmpegThumbnailsConvertor', 'format': 'png'})
+        ydl_opts['writethumbnail'] = True
+        print("Chapter split enabled: one file per chapter will be produced.")
+
+    if postprocessors:
+        ydl_opts['postprocessors'] = postprocessors
+
     try:
+        if playlist:
+            # Resolve the playlist title (and verify it really is a playlist) using
+            # flat extraction — much faster than fully resolving every entry up front.
+            info_opts = {
+                **ydl_opts,
+                'extract_flat': 'in_playlist',
+                'quiet': True,
+                'no_warnings': True,
+            }
+            with YoutubeDL(info_opts) as ydl_info:
+                playlist_info = ydl_info.extract_info(url, download=False)
+
+            entries = playlist_info.get('entries') if playlist_info else None
+            if not entries:
+                print("✗ Error: --playlist was set but no playlist entries were found")
+                print("   Make sure the URL points to a playlist (e.g. contains list=...).")
+                return False
+
+            playlist_title = playlist_info.get('title') or 'playlist'
+            entry_count = sum(1 for e in entries if e)
+            print(f"Playlist: {playlist_title}")
+            print(f"Detected {entry_count} video(s) in playlist.")
+
+            # Create the destination folder (named after the sanitized playlist title)
+            safe_playlist_dir = sanitize_filename(playlist_title)
+            os.makedirs(safe_playlist_dir, exist_ok=True)
+
+            # Files inside the folder are prefixed with the 3-digit track number,
+            # e.g. 001<title>.mp3
+            ydl_opts['outtmpl'] = os.path.join(
+                safe_playlist_dir,
+                '%(playlist_index)03d%(title)s.%(ext)s',
+            )
+
+            with YoutubeDL(ydl_opts) as ydl_dl:
+                ydl_dl.download([url])
+
+            ext = format_type
+            files = sorted(
+                f for f in os.listdir(safe_playlist_dir)
+                if f.lower().endswith(f'.{ext}')
+            )
+            if not files:
+                print(f"\n✗ Error: no {ext} files were created in {safe_playlist_dir}/")
+                return False
+
+            print(f"\n✓ Successfully downloaded {len(files)} file(s) to "
+                  f"{safe_playlist_dir}/:")
+            for f in files:
+                print(f"   - {f}")
+            return True
+
         with YoutubeDL(ydl_opts) as ydl:
-            # Extract video info first to show title
+            # Extract video info first to show title and chapters
             info = ydl.extract_info(url, download=False)
             video_title = info.get('title', 'Unknown')
+            chapters = info.get('chapters') or []
             print(f"Video: {video_title}")
-            
+
+            if split_chapters:
+                if not chapters:
+                    print("✗ Error: --chapters was requested but this video has no chapters.")
+                    return False
+                print(f"Detected {len(chapters)} chapter(s).")
+
             # Sanitize the title for filename
             safe_title = sanitize_filename(video_title)
-            
-            # Update output template with sanitized title
-            ydl_opts['outtmpl'] = f"{safe_title}.%(ext)s"
-            
+
+            # Update output template with sanitized title.
+            # For chapter splits, the chapter files are placed in a folder named
+            # after the video title. Each chapter file is prefixed with its
+            # zero-padded 3-digit chapter number, e.g. 001<videotitle>_<chapter>.<ext>
+            if split_chapters:
+                os.makedirs(safe_title, exist_ok=True)
+                ydl_opts['outtmpl'] = {
+                    'default': os.path.join(safe_title, f"{safe_title}.%(ext)s"),
+                    'chapter': os.path.join(
+                        safe_title,
+                        f"%(section_number)03d{safe_title}_%(section_title)s.%(ext)s",
+                    ),
+                }
+            else:
+                ydl_opts['outtmpl'] = f"{safe_title}.%(ext)s"
+
             # Perform the actual download with updated options
             with YoutubeDL(ydl_opts) as ydl2:
                 ydl2.download([url])
-            
-            # Determine the actual output filename
-            if format_type == 'mp3':
-                expected_file = f"{safe_title}.mp3"
-            else:
-                expected_file = f"{safe_title}.mp4"
-            
+
+            if split_chapters:
+                # Find the chapter files that were created inside the folder.
+                # Chapter files start with a 3-digit chapter number prefix.
+                ext = format_type
+                chapter_files = sorted(
+                    f for f in os.listdir(safe_title)
+                    if re.match(r'^\d{3}', f) and f.endswith(f'.{ext}')
+                )
+
+                # FFmpegSplitChapters keeps the original full-length file alongside
+                # the chapter files. Remove it so only the chapter files remain.
+                full_file = os.path.join(safe_title, f"{safe_title}.{ext}")
+                if os.path.exists(full_file):
+                    try:
+                        os.remove(full_file)
+                    except OSError as e:
+                        print(f"Warning: could not remove full-length file {full_file}: {e}")
+
+                # Locate the thumbnail (writethumbnail + FFmpegThumbnailsConvertor
+                # produces <safe_title>.png next to the chapter files).
+                thumbnail = os.path.join(safe_title, f"{safe_title}.png")
+                thumbnail_note = ""
+                if os.path.exists(thumbnail):
+                    thumbnail_note = f" (+ thumbnail: {safe_title}.png)"
+
+                if not chapter_files:
+                    print("\n✗ Error: chapter splitting did not produce any files.")
+                    return False
+
+                print(f"\n✓ Successfully downloaded {len(chapter_files)} chapter file(s) "
+                      f"to {safe_title}/{thumbnail_note}:")
+                for f in chapter_files:
+                    print(f"   - {f}")
+                return True
+
+            # Determine the actual output filename (single-file case)
+            expected_file = f"{safe_title}.{format_type}"
+
             # Check if file exists and get final name (in case of duplicates handled by yt-dlp)
             if os.path.exists(expected_file):
                 final_file = expected_file
             else:
                 # yt-dlp might have added a suffix, try to find it
-                matching_files = [f for f in os.listdir('.') 
+                matching_files = [f for f in os.listdir('.')
                                 if f.startswith(safe_title) and f.endswith(f'.{format_type}')]
                 if matching_files:
                     # Sort to get the most recent one
                     final_file = sorted(matching_files)[-1]
                 else:
                     final_file = expected_file  # Fallback
-            
+
             print(f"\n✓ Successfully downloaded: {final_file}")
             return True
     
@@ -296,10 +441,15 @@ def main():
     if args is None:
         sys.exit(1)
     
-    url, format_type = args
-    
+    url, format_type, split_chapters, playlist = args
+
     # Perform download
-    success = download_video(url, format_type)
+    success = download_video(
+        url,
+        format_type,
+        split_chapters=split_chapters,
+        playlist=playlist,
+    )
     
     if not success:
         sys.exit(1)
