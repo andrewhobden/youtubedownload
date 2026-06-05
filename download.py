@@ -7,13 +7,15 @@ Downloads YouTube videos as MP4 or audio as MP3
 import sys
 import re
 import os
+import subprocess
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError, ExtractorError
 
 
 def print_usage():
     """Print usage information"""
-    print("Usage: python download.py <youtube_url> <format> [--chapters | --playlist]")
+    print("Usage: python download.py <youtube_url> <format> "
+          "[--chapters | --playlist | --autosplit]")
     print("\nParameters:")
     print("  <youtube_url>  - The YouTube video or playlist URL")
     print("  <format>       - Either 'mp3' (audio) or 'mp4' (video)")
@@ -22,11 +24,17 @@ def print_usage():
     print("  --playlist     - Optional. Download every video in the playlist into")
     print("                   a folder named after the playlist. Each file is")
     print("                   prefixed with its 3-digit track number (e.g. 001title.mp3)")
+    print("  --autosplit    - Optional, mp3 only. For videos without chapters: download")
+    print("                   as MP3 into a folder (with the thumbnail), then detect")
+    print("                   short quiet gaps to split it into separate track files")
+    print("                   (001title.mp3, 002title.mp3, ...). Useful for music")
+    print("                   album uploads that lack chapter metadata.")
     print("\nExamples:")
     print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp4")
     print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp3")
     print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp3 --chapters")
     print("  python download.py 'https://www.youtube.com/playlist?list=PLxxxx' mp3 --playlist")
+    print("  python download.py https://www.youtube.com/watch?v=dQw4w9WgXcQ mp3 --autosplit")
 
 
 def is_valid_youtube_url(url):
@@ -52,7 +60,8 @@ def is_valid_youtube_url(url):
 def validate_arguments():
     """
     Validate command-line arguments
-    Returns: (url, format, split_chapters, playlist) tuple if valid, None if invalid
+    Returns: (url, format, split_chapters, playlist, autosplit) tuple if valid,
+    None if invalid
     """
     # Check argument count (url + format + up to one optional flag)
     if len(sys.argv) not in (3, 4):
@@ -64,6 +73,7 @@ def validate_arguments():
     format_type = sys.argv[2].lower()
     split_chapters = False
     playlist = False
+    autosplit = False
 
     if len(sys.argv) == 4:
         flag = sys.argv[3].lower()
@@ -71,6 +81,8 @@ def validate_arguments():
             split_chapters = True
         elif flag == '--playlist':
             playlist = True
+        elif flag == '--autosplit':
+            autosplit = True
         else:
             print(f"Error: Unknown option '{sys.argv[3]}'")
             print_usage()
@@ -88,7 +100,11 @@ def validate_arguments():
         print("Format must be either 'mp3' or 'mp4'")
         return None
 
-    return url, format_type, split_chapters, playlist
+    if autosplit and format_type != 'mp3':
+        print("Error: --autosplit only works with mp3 format")
+        return None
+
+    return url, format_type, split_chapters, playlist, autosplit
 
 
 def sanitize_filename(filename, max_length=200):
@@ -176,7 +192,71 @@ def check_ffmpeg():
     return shutil.which('ffmpeg') is not None
 
 
-def download_video(url, format_type, split_chapters=False, playlist=False):
+def detect_silence_gaps(mp3_path, noise_db=-30.0, min_silence=1.5):
+    """
+    Run ffmpeg's silencedetect filter on an audio file and return the gaps
+    it found as a list of (silence_start, silence_end) tuples (seconds).
+    """
+    result = subprocess.run(
+        [
+            'ffmpeg', '-hide_banner', '-nostats', '-i', mp3_path,
+            '-af', f'silencedetect=noise={noise_db}dB:d={min_silence}',
+            '-f', 'null', '-',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    output = result.stderr or ''
+    starts = [float(m) for m in re.findall(r'silence_start:\s*([0-9.]+)', output)]
+    ends = [float(m) for m in re.findall(r'silence_end:\s*([0-9.]+)', output)]
+    # Pair them up; ignore any trailing unmatched silence_start
+    return list(zip(starts, ends))
+
+
+def split_audio_by_silence(mp3_path, out_dir, base_name, total_duration,
+                           noise_db=-30.0, min_silence=1.5, min_track=30.0):
+    """
+    Slice mp3_path into tracks at silence gaps and write them into out_dir
+    as <NNN><base_name>.mp3.
+
+    Returns (track_files, silence_gaps).
+    """
+    silences = detect_silence_gaps(mp3_path, noise_db, min_silence)
+
+    # Build track ranges by walking the silences in order. The track start is
+    # the previous silence's end (or 0 for the first), the track end is the
+    # next silence's start (or duration for the last). Skip ranges shorter
+    # than min_track to discard leading/trailing silence noise.
+    tracks = []
+    cursor = 0.0
+    for s_start, s_end in silences:
+        end = s_start
+        if end - cursor >= min_track:
+            tracks.append((cursor, end))
+        cursor = s_end
+    if total_duration - cursor >= min_track:
+        tracks.append((cursor, total_duration))
+
+    track_files = []
+    for i, (t_start, t_end) in enumerate(tracks, 1):
+        out_name = f"{i:03d}{base_name}.mp3"
+        out_path = os.path.join(out_dir, out_name)
+        subprocess.run(
+            [
+                'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                '-i', mp3_path,
+                '-ss', f"{t_start:.3f}", '-to', f"{t_end:.3f}",
+                '-c', 'copy', out_path,
+            ],
+            check=True,
+        )
+        track_files.append(out_name)
+
+    return track_files, silences
+
+
+def download_video(url, format_type, split_chapters=False, playlist=False,
+                   autosplit=False):
     """
     Download YouTube video in specified format
 
@@ -187,12 +267,15 @@ def download_video(url, format_type, split_chapters=False, playlist=False):
         playlist: If True, download every video in the playlist into a folder
                   named after the playlist; files are prefixed with a 3-digit
                   track number (e.g. 001<title>.<ext>)
+        autosplit: mp3-only. If True, download into a folder (with the
+                   thumbnail) then use silence detection to split the file
+                   into separate track files (001<title>.mp3, ...).
 
     Returns:
         True if successful, False otherwise
     """
-    # ffmpeg is required for MP3 conversion and for chapter splitting
-    needs_ffmpeg = format_type == 'mp3' or split_chapters
+    # ffmpeg is required for MP3 conversion, chapter splitting, and autosplit
+    needs_ffmpeg = format_type == 'mp3' or split_chapters or autosplit
     if needs_ffmpeg and not check_ffmpeg():
         print("✗ Error: ffmpeg is not installed or not in PATH")
         reason = "MP3 conversion" if format_type == 'mp3' else "chapter splitting"
@@ -245,6 +328,13 @@ def download_video(url, format_type, split_chapters=False, playlist=False):
         postprocessors.append({'key': 'FFmpegThumbnailsConvertor', 'format': 'png'})
         ydl_opts['writethumbnail'] = True
         print("Chapter split enabled: one file per chapter will be produced.")
+    elif autosplit:
+        # We split the MP3 manually after yt-dlp finishes; still write the
+        # thumbnail next to the resulting tracks.
+        postprocessors.append({'key': 'FFmpegThumbnailsConvertor', 'format': 'png'})
+        ydl_opts['writethumbnail'] = True
+        print("Auto-split enabled: tracks will be detected from silence after "
+              "download.")
 
     if postprocessors:
         ydl_opts['postprocessors'] = postprocessors
@@ -331,6 +421,12 @@ def download_video(url, format_type, split_chapters=False, playlist=False):
                         f"%(section_number)03d{safe_title}_%(section_title)s.%(ext)s",
                     ),
                 }
+            elif autosplit:
+                # MP3 + thumbnail go into a folder; we'll split into tracks below.
+                os.makedirs(safe_title, exist_ok=True)
+                ydl_opts['outtmpl'] = os.path.join(
+                    safe_title, f"{safe_title}.%(ext)s"
+                )
             else:
                 ydl_opts['outtmpl'] = f"{safe_title}.%(ext)s"
 
@@ -370,6 +466,45 @@ def download_video(url, format_type, split_chapters=False, playlist=False):
                 print(f"\n✓ Successfully downloaded {len(chapter_files)} chapter file(s) "
                       f"to {safe_title}/{thumbnail_note}:")
                 for f in chapter_files:
+                    print(f"   - {f}")
+                return True
+
+            if autosplit:
+                full_mp3 = os.path.join(safe_title, f"{safe_title}.mp3")
+                if not os.path.exists(full_mp3):
+                    print(f"\n✗ Error: expected file {full_mp3} not found after download.")
+                    return False
+
+                duration = info.get('duration') or 0.0
+                print(f"\nAnalysing {full_mp3} for silence gaps "
+                      f"(threshold -30 dB, min 1.5 s)...")
+                track_files, silences = split_audio_by_silence(
+                    full_mp3, safe_title, safe_title, duration,
+                )
+                print(f"Detected {len(silences)} silence gap(s); produced "
+                      f"{len(track_files)} track(s).")
+
+                if not track_files:
+                    print("\n✗ Error: no tracks detected. The video may be a "
+                          "continuous mix, or the silence threshold may be too "
+                          "strict for this audio.")
+                    print(f"   Keeping original file: {full_mp3}")
+                    return False
+
+                # Remove the intermediate full-length mp3 — only the tracks remain.
+                try:
+                    os.remove(full_mp3)
+                except OSError as e:
+                    print(f"Warning: could not remove original mp3 {full_mp3}: {e}")
+
+                thumbnail = os.path.join(safe_title, f"{safe_title}.png")
+                thumbnail_note = ""
+                if os.path.exists(thumbnail):
+                    thumbnail_note = f" (+ thumbnail: {safe_title}.png)"
+
+                print(f"\n✓ Auto-split produced {len(track_files)} track(s) to "
+                      f"{safe_title}/{thumbnail_note}:")
+                for f in track_files:
                     print(f"   - {f}")
                 return True
 
@@ -441,7 +576,7 @@ def main():
     if args is None:
         sys.exit(1)
     
-    url, format_type, split_chapters, playlist = args
+    url, format_type, split_chapters, playlist, autosplit = args
 
     # Perform download
     success = download_video(
@@ -449,6 +584,7 @@ def main():
         format_type,
         split_chapters=split_chapters,
         playlist=playlist,
+        autosplit=autosplit,
     )
     
     if not success:
