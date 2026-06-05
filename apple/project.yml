@@ -1,0 +1,138 @@
+name: YouTubeLibrary
+
+options:
+  bundleIdPrefix: com.anhobden.youtubelibrary
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "13.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  defaultConfig: Debug
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""           # set in Xcode after first generate
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # iOS-only for v1. Catalyst is deferred until Python-Apple-support
+    # ships a Catalyst slice (the XCFrameworks here are iOS device +
+    # simulator only; the ffmpeg-kit fork has a Catalyst slice but
+    # Python.xcframework does not).
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  PythonKit:
+    url: https://github.com/pvieito/PythonKit.git
+    branch: master
+
+targets:
+  YouTubeLibrary:
+    type: application
+    platform: iOS
+    supportedDestinations: [iOS]
+    deploymentTarget:
+      iOS: "17.0"
+    sources:
+      - path: App
+      - path: Library
+      - path: Model
+      - path: Core
+      # Bundle the Python helper + stdlib + site-packages at the .app
+      # bundle ROOT (not under Resources/) because iOS app bundles are
+      # flat and CoreSimulator's installer rejects bundles with a
+      # Resources/ subdirectory.
+      - path: Resources/youtube_core.py
+        buildPhase: resources
+      - path: Resources/python-stdlib
+        buildPhase: resources
+        type: folder
+      - path: Resources/site-packages
+        buildPhase: resources
+        type: folder
+    dependencies:
+      - package: PythonKit
+      - framework: Frameworks/Python.xcframework
+        embed: true
+      - framework: Frameworks/ffmpegkit.xcframework
+        embed: true
+      # ffmpeg-kit's underlying libav* + libsw* libraries — must be linked
+      # alongside ffmpegkit.xcframework or ffmpegkit fails to load.
+      - framework: Frameworks/libavcodec.xcframework
+        embed: true
+      - framework: Frameworks/libavdevice.xcframework
+        embed: true
+      - framework: Frameworks/libavfilter.xcframework
+        embed: true
+      - framework: Frameworks/libavformat.xcframework
+        embed: true
+      - framework: Frameworks/libavutil.xcframework
+        embed: true
+      - framework: Frameworks/libswresample.xcframework
+        embed: true
+      - framework: Frameworks/libswscale.xcframework
+        embed: true
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: YouTube Library
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortraitUpsideDown
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+    entitlements:
+      path: App/YouTubeLibrary.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.network.client: true
+    postBuildScripts:
+      - name: "Stage Python lib-dynload for current slice"
+        runOnlyWhenInstalling: false
+        outputFiles:
+          - "$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/python-stdlib/lib/python3.13/lib-dynload/.stamp"
+        script: |
+          set -e
+          XCF="$SRCROOT/Frameworks/Python.xcframework"
+          DEST="$TARGET_BUILD_DIR/$WRAPPER_NAME/python-stdlib/lib/python3.13/lib-dynload"
+          if [ "$PLATFORM_NAME" = "iphoneos" ]; then
+            SRC="$XCF/ios-arm64/lib-arm64/python3.13/lib-dynload"
+          elif [ "$PLATFORM_NAME" = "iphonesimulator" ]; then
+            ARCH="${ARCHS%% *}"  # first arch from the list
+            if [ "$ARCH" = "x86_64" ]; then
+              SRC="$XCF/ios-arm64_x86_64-simulator/lib-x86_64/python3.13/lib-dynload"
+            else
+              SRC="$XCF/ios-arm64_x86_64-simulator/lib-arm64/python3.13/lib-dynload"
+            fi
+          else
+            echo "warning: lib-dynload not staged for PLATFORM_NAME=$PLATFORM_NAME"
+            exit 0
+          fi
+          mkdir -p "$DEST"
+          # Use rsync so we only copy when source changes.
+          rsync -a --delete "$SRC/" "$DEST/"
+          touch "$DEST/.stamp"
+          echo "Staged lib-dynload from $SRC"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.anhobden.youtubelibrary
+        TARGETED_DEVICE_FAMILY: "1,2"           # iPhone + iPad
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+        OTHER_LDFLAGS: "$(inherited) -ObjC"

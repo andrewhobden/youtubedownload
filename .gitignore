@@ -40,3 +40,17 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Xcode / iOS app build artifacts (apple/)
+apple/YouTubeLibrary.xcodeproj/
+apple/*.xcworkspace/
+apple/DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+
+# Large binary deps under apple/ — fetched per-machine via README setup
+# steps, not committed.
+apple/Frameworks/
+apple/Resources/python-stdlib/
+apple/Resources/site-packages/
