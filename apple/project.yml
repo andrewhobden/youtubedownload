@@ -41,6 +41,8 @@ targets:
       - path: Library
       - path: Model
       - path: Core
+      - path: Assets.xcassets
+        buildPhase: resources
       # Bundle the Python helper + stdlib + site-packages at the .app
       # bundle ROOT (not under Resources/) because iOS app bundles are
       # flat and CoreSimulator's installer rejects bundles with a
@@ -80,7 +82,10 @@ targets:
       properties:
         CFBundleDisplayName: YouTube Library
         LSRequiresIPhoneOS: true
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: true
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UIApplicationSceneManifest:
@@ -136,3 +141,4 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"           # iPhone + iPad
         SWIFT_OBJC_BRIDGING_HEADER: ""
         OTHER_LDFLAGS: "$(inherited) -ObjC"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

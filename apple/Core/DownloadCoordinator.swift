@@ -1,6 +1,9 @@
 import Foundation
 import SwiftData
 import PythonKit
+import os.log
+
+private let coordLog = Logger(subsystem: "com.anhobden.youtubelibrary", category: "DownloadCoordinator")
 
 /// State of a single download job.
 enum DownloadJobState: Equatable {
@@ -179,8 +182,9 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
             } catch {
                 // Don't abandon the whole album for one bad chapter — log
                 // and continue. The user gets a partial album instead of
-                // nothing.
-                print("[Chapter \(i+1)] slice failed: \(error)")
+                // nothing. Uses os_log so it surfaces in `simctl spawn log
+                // show` next time (Swift print() doesn't reach the unified log).
+                coordLog.error("Chapter \(i+1) slice failed: \(String(describing: error), privacy: .public)")
                 failed.append(i + 1)
                 continue
             }

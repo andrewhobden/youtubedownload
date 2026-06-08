@@ -21,12 +21,32 @@ enum FFmpegOps {
     /// Run a raw ffmpeg command as an array of arguments (no shell
     /// tokenisation, so paths with spaces / parens / quotes are safe).
     /// Returns the captured log output (stdout + stderr).
+    ///
+    /// Implementation note: we use the **async** entry point and block on
+    /// a semaphore. The synchronous `execute(withArguments:)` returns
+    /// before ffmpeg actually finishes when called repeatedly in tight
+    /// succession (observed during chapter slicing — most slices came back
+    /// with non-success return codes even though the inputs were valid).
+    /// The async + completion-callback pattern guarantees the session is
+    /// complete by the time we inspect its return code.
     @discardableResult
     static func run(_ args: [String]) throws -> String {
         #if canImport(ffmpegkit)
-        let session = FFmpegKit.execute(withArguments: args)
-        guard let session else {
-            throw FFmpegError.nonZeroExit(code: -1, command: args.joined(separator: " "), log: "")
+        let semaphore = DispatchSemaphore(value: 0)
+        var finished: (any Session)?
+        FFmpegKit.execute(
+            withArgumentsAsync: args,
+            withCompleteCallback: { session in
+                finished = session
+                semaphore.signal()
+            }
+        )
+        semaphore.wait()
+
+        guard let session = finished else {
+            throw FFmpegError.nonZeroExit(
+                code: -1, command: args.joined(separator: " "), log: ""
+            )
         }
         let code = session.getReturnCode()
         let log = session.getAllLogsAsString() ?? ""
