@@ -27,10 +27,16 @@ final class NowPlaying: ObservableObject {
     @Published private(set) var currentIndex: Int = 0
     @Published private(set) var currentAlbum: String = ""
     @Published private(set) var isPlaying: Bool = false
+    /// Current playback position in seconds. Updated ~4x/s by a timer
+    /// while a track is playing. Read-only from the UI; use `seek` to set.
+    @Published private(set) var currentTime: TimeInterval = 0
+    /// Active track's total duration in seconds. Zero when no track is loaded.
+    @Published private(set) var duration: TimeInterval = 0
 
     private var player: AVAudioPlayer?
     private var delegateBox: AVAudioPlayerDelegate?
     private var artworkImage: PlatformImage?
+    private var progressTimer: Timer?
 
     init() {
         configureAudioSession()
@@ -66,6 +72,16 @@ final class NowPlaying: ObservableObject {
         refreshNowPlayingInfo(elapsed: p.currentTime, duration: p.duration)
     }
 
+    /// Jump to `time` (seconds, clamped to [0, duration]) in the current
+    /// track. Used by the progress slider for scrubbing.
+    func seek(to time: TimeInterval) {
+        guard let p = player else { return }
+        let clamped = max(0, min(time, p.duration))
+        p.currentTime = clamped
+        currentTime = clamped
+        refreshNowPlayingInfo(elapsed: clamped, duration: p.duration)
+    }
+
     func next() {
         guard hasNext else { return }
         playTrack(at: currentIndex + 1)
@@ -87,6 +103,12 @@ final class NowPlaying: ObservableObject {
         player?.stop()
         player = nil
         isPlaying = false
+        currentTime = 0
+        duration = 0
+        queue = []
+        currentIndex = 0
+        currentAlbum = ""
+        stopProgressTimer()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -107,6 +129,9 @@ final class NowPlaying: ObservableObject {
             self.player = p
             self.currentIndex = index
             self.isPlaying = true
+            self.currentTime = 0
+            self.duration = p.duration
+            startProgressTimer()
             refreshNowPlayingInfo(elapsed: 0, duration: p.duration)
         } catch {
             print("NowPlaying: failed to play \(track.fileURL): \(error)")
@@ -118,8 +143,28 @@ final class NowPlaying: ObservableObject {
             next()
         } else {
             isPlaying = false
+            currentTime = 0
+            stopProgressTimer()
             refreshNowPlayingInfo(elapsed: 0, duration: 0)
         }
+    }
+
+    private func startProgressTimer() {
+        stopProgressTimer()
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let p = self.player else { return }
+                self.currentTime = p.currentTime
+                if self.duration == 0 { self.duration = p.duration }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
+    }
+
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
     }
 
     private func configureAudioSession() {
