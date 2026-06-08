@@ -201,23 +201,31 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                     continue
                 }
             }
-            context.insert(Track(
+            // Insert the track explicitly on both sides of the relationship
+            // and save now — SwiftData's inverse auto-population is flaky
+            // for back-to-back inserts and we've seen tracks created with a
+            // nil album, which makes them invisible in AlbumDetailView.
+            let track = Track(
                 album: album,
                 trackNumber: i + 1,
                 title: chTitle,
                 fileRelPath: relPath(of: outURL),
                 durationSec: chapter.endSec - chapter.startSec
-            ))
+            )
+            context.insert(track)
+            album.tracks.append(track)
+            do { try context.save() } catch {
+                coordLog.error("Chapter \(i+1) context.save failed: \(String(describing: error), privacy: .public)")
+            }
             sliced += 1
         }
         if sliced == 0 {
             throw CoordinatorError.noFileProduced
         }
         if !failed.isEmpty {
-            print("[ChaptersAlbum] \(failed.count) chapter(s) failed: \(failed)")
+            coordLog.notice("ChaptersAlbum: \(failed.count) chapter(s) failed: \(failed.map(String.init).joined(separator: ","), privacy: .public)")
         }
         try? FileManager.default.removeItem(at: fullMP3)
-        try? context.save()
     }
 
     private func downloadAutosplitAlbum(probe: ProbeResult) async throws {
