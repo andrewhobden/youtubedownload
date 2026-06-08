@@ -18,20 +18,23 @@ enum FFmpegError: Error {
 /// main thread.
 enum FFmpegOps {
 
-    /// Run a raw ffmpeg command. Returns the captured log output (stdout +
-    /// stderr) so callers can parse it (e.g. silencedetect).
+    /// Run a raw ffmpeg command as an array of arguments (no shell
+    /// tokenisation, so paths with spaces / parens / quotes are safe).
+    /// Returns the captured log output (stdout + stderr).
     @discardableResult
-    static func run(_ command: String) throws -> String {
+    static func run(_ args: [String]) throws -> String {
         #if canImport(ffmpegkit)
-        let session = FFmpegKit.execute(command)
+        let session = FFmpegKit.execute(withArguments: args)
         guard let session else {
-            throw FFmpegError.nonZeroExit(code: -1, command: command, log: "")
+            throw FFmpegError.nonZeroExit(code: -1, command: args.joined(separator: " "), log: "")
         }
         let code = session.getReturnCode()
         let log = session.getAllLogsAsString() ?? ""
         if !ReturnCode.isSuccess(code) {
             throw FFmpegError.nonZeroExit(
-                code: code?.getValue() ?? -1, command: command, log: log
+                code: code?.getValue() ?? -1,
+                command: args.joined(separator: " "),
+                log: log
             )
         }
         return log
@@ -44,7 +47,14 @@ enum FFmpegOps {
 
     /// Convert any audio file to a 192 kbps MP3 at `out`.
     static func extractMP3(input: URL, output: URL) throws {
-        try run("-y -i \"\(input.path)\" -vn -c:a libmp3lame -b:a 192k \"\(output.path)\"")
+        try run([
+            "-y",
+            "-i", input.path,
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
+            output.path,
+        ])
     }
 
     /// Slice a media file into [start, end] (seconds) using `-c copy` (fast,
@@ -53,25 +63,28 @@ enum FFmpegOps {
     static func slice(
         input: URL, start: Double, end: Double, output: URL
     ) throws {
-        let cmd = String(
-            format: "-y -i \"%@\" -ss %.3f -to %.3f -c copy \"%@\"",
-            input.path, start, end, output.path
-        )
-        try run(cmd)
+        try run([
+            "-y",
+            "-i", input.path,
+            "-ss", String(format: "%.3f", start),
+            "-to", String(format: "%.3f", end),
+            "-c", "copy",
+            output.path,
+        ])
     }
 
     /// Convert webp/jpg → png next to the source.
     static func convertImage(input: URL, output: URL) throws {
-        try run("-y -i \"\(input.path)\" \"\(output.path)\"")
+        try run(["-y", "-i", input.path, output.path])
     }
 
     /// Probe a file's duration in seconds. Implemented via ffmpeg (not
     /// ffprobe) so we don't add a second binding.
     static func duration(of url: URL) throws -> Double {
-        // ffmpeg writes "Duration: HH:MM:SS.ms" to stderr when given -i.
+        let args = ["-i", url.path, "-hide_banner", "-f", "null", "-"]
         let log: String
         do {
-            log = try run("-i \"\(url.path)\" -hide_banner -f null -")
+            log = try run(args)
         } catch let FFmpegError.nonZeroExit(_, _, captured) {
             // ffmpeg may exit non-zero when given no output; the log still
             // contains the Duration line we want.

@@ -1,12 +1,14 @@
 import SwiftUI
 import SwiftData
 
+/// Library list of albums. Uses `List` (not `LazyVGrid`) so it gets native
+/// swipe-to-delete; the row layout is thumbnail + title + track count,
+/// matching Apple Music's "Library > Albums" list view.
 struct AlbumsGridView: View {
     @Query(sort: \Album.addedAt, order: .reverse) private var albums: [Album]
     @EnvironmentObject var mediaRoot: MediaRoot
+    @Environment(\.modelContext) private var context
     @State private var showingAdd = false
-
-    private let columns = [GridItem(.adaptive(minimum: 140), spacing: 16)]
 
     var body: some View {
         NavigationStack {
@@ -18,18 +20,21 @@ struct AlbumsGridView: View {
                         description: Text("Tap + to add a YouTube URL.")
                     )
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(albums) { album in
-                                NavigationLink {
-                                    AlbumDetailView(album: album)
+                    List {
+                        ForEach(albums) { album in
+                            NavigationLink {
+                                AlbumDetailView(album: album)
+                            } label: {
+                                AlbumRow(album: album)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    delete(album)
                                 } label: {
-                                    AlbumTile(album: album)
+                                    Label("Delete", systemImage: "trash")
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
-                        .padding()
                     }
                 }
             }
@@ -46,35 +51,58 @@ struct AlbumsGridView: View {
             }
         }
     }
+
+    private func delete(_ album: Album) {
+        // Tracks live in a per-album folder under MediaRoot. Delete the
+        // folder (the cover image + all track mp3s) then drop the catalog
+        // entries. Track rows are cascade-deleted via the @Relationship.
+        if let track = album.orderedTracks.first,
+           let trackURL = track.fileURL(in: mediaRoot) {
+            let folder = trackURL.deletingLastPathComponent()
+            try? FileManager.default.removeItem(at: folder)
+        } else if let cover = album.coverURL(in: mediaRoot) {
+            // Fallback: single-track album with no tracks fetched.
+            try? FileManager.default.removeItem(at: cover.deletingLastPathComponent())
+        }
+        context.delete(album)
+        try? context.save()
+    }
 }
 
-private struct AlbumTile: View {
+private struct AlbumRow: View {
     let album: Album
     @EnvironmentObject var mediaRoot: MediaRoot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                Rectangle()
-                    .fill(.quaternary)
-                    .aspectRatio(1, contentMode: .fit)
-                    .cornerRadius(8)
-                if let coverURL = album.coverURL(in: mediaRoot),
-                   let img = PlatformImage(contentsOfFile: coverURL.path) {
-                    #if canImport(UIKit)
-                    Image(uiImage: img).resizable().scaledToFill().cornerRadius(8)
-                    #else
-                    Image(nsImage: img).resizable().scaledToFill().cornerRadius(8)
-                    #endif
-                } else {
-                    Image(systemName: "music.note")
-                        .font(.largeTitle).foregroundStyle(.tertiary)
-                }
+        HStack(spacing: 12) {
+            cover
+                .frame(width: 56, height: 56)
+                .cornerRadius(6)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(album.title)
+                    .lineLimit(2)
+                Text("\(album.tracks.count) tracks · \(album.sourceKind.rawValue.capitalized)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Text(album.title)
-                .font(.headline).lineLimit(1)
-            Text("\(album.tracks.count) tracks")
-                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder private var cover: some View {
+        if let url = album.coverURL(in: mediaRoot),
+           let img = PlatformImage(contentsOfFile: url.path) {
+            #if canImport(UIKit)
+            Image(uiImage: img).resizable().scaledToFill()
+            #else
+            Image(nsImage: img).resizable().scaledToFill()
+            #endif
+        } else {
+            ZStack {
+                Rectangle().fill(.quaternary)
+                Image(systemName: "music.note")
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }

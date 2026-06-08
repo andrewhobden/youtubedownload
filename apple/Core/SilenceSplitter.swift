@@ -15,13 +15,15 @@ enum SilenceSplitter {
         noiseDb: Double = defaultNoiseDb,
         minSilence: Double = defaultMinSilence
     ) throws -> [(Double, Double)] {
-        let cmd = String(
-            format: "-hide_banner -nostats -i \"%@\" -af silencedetect=noise=%.1fdB:d=%.2f -f null -",
-            mp3.path, noiseDb, minSilence
-        )
+        let args = [
+            "-hide_banner", "-nostats",
+            "-i", mp3.path,
+            "-af", String(format: "silencedetect=noise=%.1fdB:d=%.2f", noiseDb, minSilence),
+            "-f", "null", "-",
+        ]
         let log: String
         do {
-            log = try FFmpegOps.run(cmd)
+            log = try FFmpegOps.run(args)
         } catch let FFmpegError.nonZeroExit(_, _, captured) {
             // silencedetect writes to stderr; non-zero exit is OK here too.
             log = captured

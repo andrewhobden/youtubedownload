@@ -160,6 +160,8 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
         )
         context.insert(album)
 
+        var sliced = 0
+        var failed: [Int] = []
         for (i, chapter) in result.chapters.enumerated() {
             let chTitle = Sanitize.filename(chapter.title.isEmpty
                                             ? "Chapter \(i+1)" : chapter.title)
@@ -167,12 +169,21 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                 format: "%03d%@_%@.mp3", i + 1, safe, chTitle
             )
             let outURL = outDir.appendingPathComponent(outName)
-            try FFmpegOps.slice(
-                input: fullMP3,
-                start: chapter.startSec,
-                end: chapter.endSec,
-                output: outURL
-            )
+            do {
+                try FFmpegOps.slice(
+                    input: fullMP3,
+                    start: chapter.startSec,
+                    end: chapter.endSec,
+                    output: outURL
+                )
+            } catch {
+                // Don't abandon the whole album for one bad chapter — log
+                // and continue. The user gets a partial album instead of
+                // nothing.
+                print("[Chapter \(i+1)] slice failed: \(error)")
+                failed.append(i + 1)
+                continue
+            }
             context.insert(Track(
                 album: album,
                 trackNumber: i + 1,
@@ -180,6 +191,13 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                 fileRelPath: relPath(of: outURL),
                 durationSec: chapter.endSec - chapter.startSec
             ))
+            sliced += 1
+        }
+        if sliced == 0 {
+            throw CoordinatorError.noFileProduced
+        }
+        if !failed.isEmpty {
+            print("[ChaptersAlbum] \(failed.count) chapter(s) failed: \(failed)")
         }
         try? FileManager.default.removeItem(at: fullMP3)
         try? context.save()

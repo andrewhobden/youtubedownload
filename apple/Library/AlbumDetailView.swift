@@ -8,29 +8,41 @@ struct AlbumDetailView: View {
     var body: some View {
         List {
             Section {
-                HStack(alignment: .top, spacing: 16) {
-                    cover
-                        .frame(width: 140, height: 140)
-                        .cornerRadius(10)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(album.title).font(.title2).bold().lineLimit(2)
-                        Text("\(album.tracks.count) tracks · \(album.sourceKind.rawValue.capitalized)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Button {
-                                playFromIndex(0)
-                            } label: {
-                                Label("Play", systemImage: "play.fill")
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Button {
-                                playShuffled()
-                            } label: {
-                                Label("Shuffle", systemImage: "shuffle")
-                            }
-                            .buttonStyle(.bordered)
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 16) {
+                        cover
+                            .frame(width: 120, height: 120)
+                            .cornerRadius(10)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(album.title)
+                                .font(.title3).bold()
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("\(album.tracks.count) tracks · \(album.sourceKind.rawValue.capitalized)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
+                        Spacer(minLength: 0)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            playFromIndex(0)
+                        } label: {
+                            Label("Play", systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+
+                        Button {
+                            playShuffled()
+                        } label: {
+                            Label("Shuffle", systemImage: "shuffle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
                     }
                 }
                 .padding(.vertical, 4)

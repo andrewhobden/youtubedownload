@@ -4,6 +4,7 @@ import SwiftData
 struct VideosListView: View {
     @Query(sort: \VideoItem.addedAt, order: .reverse) private var items: [VideoItem]
     @EnvironmentObject var mediaRoot: MediaRoot
+    @Environment(\.modelContext) private var context
     @State private var showingAdd = false
 
     var body: some View {
@@ -16,13 +17,22 @@ struct VideosListView: View {
                         description: Text("Tap + to add a YouTube URL.")
                     )
                 } else {
-                    List(items) { item in
-                        NavigationLink {
-                            if let url = item.fileURL(in: mediaRoot) {
-                                VideoPlayerView(fileURL: url, title: item.title)
+                    List {
+                        ForEach(items) { item in
+                            NavigationLink {
+                                if let url = item.fileURL(in: mediaRoot) {
+                                    VideoPlayerView(fileURL: url, title: item.title)
+                                }
+                            } label: {
+                                VideoRow(item: item)
                             }
-                        } label: {
-                            VideoRow(item: item)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    delete(item)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }
@@ -39,6 +49,20 @@ struct VideosListView: View {
                 AddUrlsSheet(destination: .videos)
             }
         }
+    }
+
+    private func delete(_ item: VideoItem) {
+        // Remove the on-disk file (and thumbnail) first; then drop the
+        // catalog entry. If file removal fails (already gone, permission)
+        // we still delete the entry so the user isn't left with a ghost.
+        if let url = item.fileURL(in: mediaRoot) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if let thumb = item.thumbnailURL(in: mediaRoot) {
+            try? FileManager.default.removeItem(at: thumb)
+        }
+        context.delete(item)
+        try? context.save()
     }
 }
 
