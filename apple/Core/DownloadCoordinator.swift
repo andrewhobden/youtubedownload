@@ -180,16 +180,26 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                     output: outURL
                 )
             } catch {
-                // FFmpegKit's return-code reporting is flaky — sometimes
-                // it reports failure even when ffmpeg wrote a valid file.
-                // Trust the file system over the API: if the output file
-                // exists and has a reasonable size, accept the slice.
+                // FFmpegKit's return-code reporting is flaky — sometimes it
+                // reports failure even when ffmpeg wrote a valid file. There's
+                // also a race where the completion callback fires before the
+                // OS has flushed the output to disk, so a `fileExists` check
+                // immediately afterwards returns false even though the file
+                // appears moments later. Retry for up to ~1 second before
+                // giving up.
                 let fm = FileManager.default
-                if fm.fileExists(atPath: outURL.path),
-                   let size = try? fm.attributesOfItem(atPath: outURL.path)[.size] as? UInt64,
-                   size > 1024 {
-                    coordLog.info("Chapter \(i+1) reported error but produced \(size) bytes, accepting")
-                } else {
+                var accepted = false
+                for _ in 0..<10 {
+                    if fm.fileExists(atPath: outURL.path),
+                       let size = try? fm.attributesOfItem(atPath: outURL.path)[.size] as? UInt64,
+                       size > 1024 {
+                        coordLog.info("Chapter \(i+1) reported error but produced \(size) bytes, accepting")
+                        accepted = true
+                        break
+                    }
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                if !accepted {
                     coordLog.error("Chapter \(i+1) slice failed (no output file): \(String(describing: error), privacy: .public)")
                     failed.append(i + 1)
                     continue
