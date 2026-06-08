@@ -27,16 +27,6 @@ struct RootTabsView: View {
     @State private var selection: LibraryTab? = .videos
 
     var body: some View {
-        content
-            // The mini-player sits in the safe-area inset so every screen
-            // shows it whenever audio is active; tabs/sidebar still own
-            // the bottom edge.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                NowPlayingBar()
-            }
-    }
-
-    @ViewBuilder private var content: some View {
         #if targetEnvironment(macCatalyst)
         NavigationSplitView {
             List(LibraryTab.allCases, selection: $selection) { tab in
@@ -47,19 +37,32 @@ struct RootTabsView: View {
             .navigationTitle("Library")
         } detail: {
             switch selection ?? .videos {
-            case .videos: VideosListView()
-            case .music:  AlbumsGridView()
+            case .videos: VideosListView().withNowPlayingBar()
+            case .music:  AlbumsGridView().withNowPlayingBar()
             }
         }
         #else
         TabView {
             VideosListView()
+                .withNowPlayingBar()
                 .tabItem { Label(LibraryTab.videos.label,
                                  systemImage: LibraryTab.videos.systemImage) }
             AlbumsGridView()
+                .withNowPlayingBar()
                 .tabItem { Label(LibraryTab.music.label,
                                  systemImage: LibraryTab.music.systemImage) }
         }
         #endif
+    }
+}
+
+private extension View {
+    /// Insert the NowPlayingBar above the bottom safe area of the tab's
+    /// content (not the TabView itself — attaching .safeAreaInset to the
+    /// TabView pushes UIKit's tab bar offscreen on iOS).
+    func withNowPlayingBar() -> some View {
+        self.safeAreaInset(edge: .bottom, spacing: 0) {
+            NowPlayingBar()
+        }
     }
 }
