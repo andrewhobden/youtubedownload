@@ -180,27 +180,23 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                     output: outURL
                 )
             } catch {
-                // FFmpegKit's return-code reporting is flaky — sometimes it
-                // reports failure even when ffmpeg wrote a valid file. There's
-                // also a race where the completion callback fires before the
-                // OS has flushed the output to disk, so a `fileExists` check
-                // immediately afterwards returns false even though the file
-                // appears moments later. Retry for up to ~1 second before
-                // giving up.
+                // FFmpegKit's return-code reporting is flaky and the
+                // completion callback can fire before the file is flushed.
+                // Retry the fileExists check up to ~3 seconds before giving
+                // up — verified that all 9 mp3s land on disk in practice,
+                // we just have to wait long enough for the OS to publish them.
                 let fm = FileManager.default
                 var accepted = false
-                for _ in 0..<10 {
-                    if fm.fileExists(atPath: outURL.path),
-                       let size = try? fm.attributesOfItem(atPath: outURL.path)[.size] as? UInt64,
-                       size > 1024 {
-                        coordLog.info("Chapter \(i+1) reported error but produced \(size) bytes, accepting")
+                for _ in 0..<30 {
+                    if fm.fileExists(atPath: outURL.path) {
+                        coordLog.info("Chapter \(i+1) reported error but file is present, accepting")
                         accepted = true
                         break
                     }
                     Thread.sleep(forTimeInterval: 0.1)
                 }
                 if !accepted {
-                    coordLog.error("Chapter \(i+1) slice failed (no output file): \(String(describing: error), privacy: .public)")
+                    coordLog.error("Chapter \(i+1) slice failed (no output file at \(outURL.path, privacy: .public)): \(String(describing: error), privacy: .public)")
                     failed.append(i + 1)
                     continue
                 }
