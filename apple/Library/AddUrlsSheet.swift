@@ -143,20 +143,32 @@ private struct JobRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(job.title.isEmpty ? job.url.absoluteString : job.title)
                 .lineLimit(1)
-            Text(stateText)
-                .font(.caption).foregroundStyle(.secondary)
-            if case .downloading(let p) = job.state {
-                ProgressView(value: p)
+            HStack(spacing: 8) {
+                if showsSpinner {
+                    // Indeterminate spinner — yt-dlp's progress callback
+                    // isn't wired through to Swift yet, so a real percentage
+                    // would be misleading.
+                    ProgressView().controlSize(.small)
+                }
+                Text(stateText)
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var showsSpinner: Bool {
+        switch job.state {
+        case .probing, .downloading, .postProcessing: return true
+        default: return false
+        }
     }
 
     private var stateText: String {
         switch job.state {
         case .queued: return "Queued"
         case .probing: return "Probing…"
-        case .downloading(let p): return String(format: "Downloading %.0f%%", p * 100)
+        case .downloading: return "Downloading…"
         case .postProcessing(let s): return s.capitalized + "…"
         case .finished: return "Finished"
         case .failed(let m): return "Failed: \(m)"

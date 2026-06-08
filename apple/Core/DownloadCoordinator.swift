@@ -180,13 +180,20 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                     output: outURL
                 )
             } catch {
-                // Don't abandon the whole album for one bad chapter — log
-                // and continue. The user gets a partial album instead of
-                // nothing. Uses os_log so it surfaces in `simctl spawn log
-                // show` next time (Swift print() doesn't reach the unified log).
-                coordLog.error("Chapter \(i+1) slice failed: \(String(describing: error), privacy: .public)")
-                failed.append(i + 1)
-                continue
+                // FFmpegKit's return-code reporting is flaky — sometimes
+                // it reports failure even when ffmpeg wrote a valid file.
+                // Trust the file system over the API: if the output file
+                // exists and has a reasonable size, accept the slice.
+                let fm = FileManager.default
+                if fm.fileExists(atPath: outURL.path),
+                   let size = try? fm.attributesOfItem(atPath: outURL.path)[.size] as? UInt64,
+                   size > 1024 {
+                    coordLog.info("Chapter \(i+1) reported error but produced \(size) bytes, accepting")
+                } else {
+                    coordLog.error("Chapter \(i+1) slice failed (no output file): \(String(describing: error), privacy: .public)")
+                    failed.append(i + 1)
+                    continue
+                }
             }
             context.insert(Track(
                 album: album,

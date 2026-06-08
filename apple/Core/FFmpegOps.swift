@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 // ffmpeg-kit is added as a binary XCFramework (see README). Importing under
 // its module name. Until the framework is present the project builds with
 // `optional: true` on the XCFramework reference, but every FFmpegOps call
@@ -6,6 +7,8 @@ import Foundation
 #if canImport(ffmpegkit)
 import ffmpegkit
 #endif
+
+private let ffLog = Logger(subsystem: "com.anhobden.youtubelibrary", category: "FFmpegOps")
 
 enum FFmpegError: Error {
     case ffmpegKitMissing
@@ -33,7 +36,10 @@ enum FFmpegOps {
     static func run(_ args: [String]) throws -> String {
         #if canImport(ffmpegkit)
         let semaphore = DispatchSemaphore(value: 0)
-        var finished: (any Session)?
+        // The completion callback parameter is concretely typed as
+        // FFmpegSession in the Obj-C header; binding to `any Session`
+        // silently fails on some Swift bridges. Use the concrete type.
+        nonisolated(unsafe) var finished: FFmpegSession?
         FFmpegKit.execute(
             withArgumentsAsync: args,
             withCompleteCallback: { session in
@@ -44,6 +50,7 @@ enum FFmpegOps {
         semaphore.wait()
 
         guard let session = finished else {
+            ffLog.error("run: callback fired with nil session for \(args.joined(separator: " "), privacy: .public)")
             throw FFmpegError.nonZeroExit(
                 code: -1, command: args.joined(separator: " "), log: ""
             )
@@ -51,6 +58,9 @@ enum FFmpegOps {
         let code = session.getReturnCode()
         let log = session.getAllLogsAsString() ?? ""
         if !ReturnCode.isSuccess(code) {
+            let codeValue = code?.getValue().description ?? "nil"
+            let stateRaw = session.getState().rawValue
+            ffLog.error("run: non-success code=\(codeValue, privacy: .public) stateRaw=\(stateRaw, privacy: .public) args=\(args.joined(separator: " "), privacy: .public)")
             throw FFmpegError.nonZeroExit(
                 code: code?.getValue() ?? -1,
                 command: args.joined(separator: " "),
