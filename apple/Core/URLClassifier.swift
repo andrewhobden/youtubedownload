@@ -1,9 +1,10 @@
 import Foundation
 
 /// Where the user is adding a URL.
-enum LibraryDestination {
+enum LibraryDestination: Equatable {
     case videos
     case music
+    case audiobook
 }
 
 /// Result of probing a YouTube URL (the subset of yt-dlp's info we care about).
@@ -62,6 +63,19 @@ enum URLClassifier {
             }
             // Pure /watch?v=… URL.
             if probe.chapterCount >= minChapters {
+                return .chaptersMP3
+            }
+            if probe.durationSec >= autosplitMinDuration {
+                return .autosplitMP3
+            }
+            return .singleVideoMP3
+            
+        case .audiobook:
+            // Audiobooks: prefer chapter-based or autosplit for long content
+            if isPlaylistOnly {
+                return .playlistMP3
+            }
+            if probe.chapterCount >= 1 {
                 return .chaptersMP3
             }
             if probe.durationSec >= autosplitMinDuration {

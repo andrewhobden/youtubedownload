@@ -45,6 +45,8 @@ Thumbs.db
 apple/YouTubeLibrary.xcodeproj/
 apple/*.xcworkspace/
 apple/DerivedData/
+apple/build/
+apple/build-device/
 xcuserdata/
 *.xcuserstate
 *.xcuserdatad/

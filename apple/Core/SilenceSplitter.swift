@@ -76,6 +76,26 @@ enum SilenceSplitter {
         return produced
     }
 
+    /// Async, off-main version of `splitByGaps` (runs the whole detect+slice
+    /// on the shared ffmpeg queue so the UI stays responsive).
+    static func splitByGapsAsync(
+        mp3: URL,
+        outDir: URL,
+        baseName: String,
+        totalDuration: Double,
+        noiseDb: Double = defaultNoiseDb,
+        minSilence: Double = defaultMinSilence,
+        minTrack: Double = defaultMinTrack
+    ) async throws -> [String] {
+        try await FFmpegOps.runDetached {
+            try splitByGaps(
+                mp3: mp3, outDir: outDir, baseName: baseName,
+                totalDuration: totalDuration, noiseDb: noiseDb,
+                minSilence: minSilence, minTrack: minTrack
+            )
+        }
+    }
+
     private static func scrapeFloats(in haystack: String, pattern: String) -> [Double] {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let ns = haystack as NSString

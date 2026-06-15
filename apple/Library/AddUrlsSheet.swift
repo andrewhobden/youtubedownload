@@ -5,6 +5,7 @@ import SwiftData
 struct AddUrlsSheet: View {
 
     let destination: LibraryDestination
+    let initialURL: String?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -13,32 +14,69 @@ struct AddUrlsSheet: View {
     @State private var pasted: String = ""
     @State private var jobs: [DownloadCoordinator] = []
     @State private var ambiguousJob: DownloadCoordinator?
+    
+    init(destination: LibraryDestination, initialURL: String? = nil) {
+        self.destination = destination
+        self.initialURL = initialURL
+        if let url = initialURL {
+            _pasted = State(initialValue: url)
+        }
+    }
+
+    private var headerTitle: String {
+        switch destination {
+        case .videos: return "Add Videos"
+        case .music: return "Add Music"
+        case .audiobook: return "Add Audiobook"
+        }
+    }
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            Color(UIColor.systemBackground)
+                .ignoresSafeArea()
+            
             VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Text(headerTitle)
+                        .font(.headline)
+                    Spacer()
+                    Button("Done") { dismiss() }
+                }
+                .padding()
+                
                 if jobs.isEmpty {
                     pasteBox
+                    
+                    // Start button
+                    Button {
+                        startJobs()
+                    } label: {
+                        Text("Start Download")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(parsedURLs.isEmpty ? Color.gray : Color.blue)
+                            .cornerRadius(12)
+                    }
+                    .disabled(parsedURLs.isEmpty)
+                    .padding()
                 } else {
                     queueView
                 }
             }
-            .navigationTitle(destination == .videos ? "Add Videos" : "Add Music")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-                if jobs.isEmpty {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Start") { startJobs() }
-                            .disabled(parsedURLs.isEmpty)
-                    }
-                }
+        }
+        .sheet(item: $ambiguousJob) { coord in
+            AmbiguityPicker(coord: coord) { choice in
+                resolveAmbiguous(coord, choice: choice)
             }
-            .sheet(item: $ambiguousJob) { coord in
-                AmbiguityPicker(coord: coord) { choice in
-                    resolveAmbiguous(coord, choice: choice)
-                }
+        }
+        .onAppear {
+            // When launched from a search result, auto-start the download.
+            if initialURL != nil, jobs.isEmpty, !parsedURLs.isEmpty {
+                startJobs()
             }
         }
     }
@@ -169,6 +207,7 @@ private struct JobRow: View {
         case .queued: return "Queued"
         case .probing: return "Probing…"
         case .downloading: return "Downloading…"
+        case .paused: return "Paused for search"
         case .postProcessing(let s): return s.capitalized + "…"
         case .finished: return "Finished"
         case .failed(let m): return "Failed: \(m)"

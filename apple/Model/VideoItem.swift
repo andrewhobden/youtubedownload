@@ -10,6 +10,17 @@ final class VideoItem {
     var thumbnailRelPath: String?
     var durationSec: Double
     var addedAt: Date
+    
+    // Metadata enrichment fields
+    var creator: String?               // Channel/creator name
+    var genre: String?
+    var year: Int?
+    var rating: Int?                   // 0-5 stars
+    var tagsRaw: String?               // Comma-separated tags
+    var subtitleRelPath: String?       // Path to subtitle/caption file
+    var playCount: Int = 0
+    var lastPlayedAt: Date?
+    var lastPosition: TimeInterval = 0 // Resume position for videos
 
     init(
         id: UUID = UUID(),
@@ -18,7 +29,9 @@ final class VideoItem {
         fileRelPath: String,
         thumbnailRelPath: String? = nil,
         durationSec: Double,
-        addedAt: Date = .now
+        addedAt: Date = .now,
+        creator: String? = nil,
+        genre: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -27,6 +40,24 @@ final class VideoItem {
         self.thumbnailRelPath = thumbnailRelPath
         self.durationSec = durationSec
         self.addedAt = addedAt
+        self.creator = creator
+        self.genre = genre
+    }
+    
+    var tags: [String] {
+        get {
+            guard let raw = tagsRaw, !raw.isEmpty else { return [] }
+            return raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        set {
+            tagsRaw = newValue.isEmpty ? nil : newValue.joined(separator: ", ")
+        }
+    }
+    
+    /// Increment play count and update last played timestamp.
+    func recordPlay() {
+        playCount += 1
+        lastPlayedAt = .now
     }
 
     /// Absolute on-disk URL for the video file, resolved against the current
@@ -38,6 +69,11 @@ final class VideoItem {
 
     @MainActor func thumbnailURL(in root: MediaRoot) -> URL? {
         guard let rel = thumbnailRelPath else { return nil }
+        return root.resolve(rel)
+    }
+    
+    @MainActor func subtitleURL(in root: MediaRoot) -> URL? {
+        guard let rel = subtitleRelPath else { return nil }
         return root.resolve(rel)
     }
 }

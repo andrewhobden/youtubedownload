@@ -32,15 +32,22 @@ final class NowPlaying: ObservableObject {
     @Published private(set) var currentTime: TimeInterval = 0
     /// Active track's total duration in seconds. Zero when no track is loaded.
     @Published private(set) var duration: TimeInterval = 0
+    /// Output volume (0…1), applied to the current and future tracks.
+    @Published var volume: Float = 1.0 {
+        didSet { player?.volume = volume }
+    }
 
     private var player: AVAudioPlayer?
     private var delegateBox: AVAudioPlayerDelegate?
-    private var artworkImage: PlatformImage?
+    /// Cover art for the current album/track; surfaced to the player UI and the
+    /// lockscreen Now Playing info.
+    @Published private(set) var artworkImage: PlatformImage?
     private var progressTimer: Timer?
 
     init() {
         configureAudioSession()
         wireRemoteCommands()
+        PlaybackCoordinator.shared.register(self)
     }
 
     var currentTrack: PlayableTrack? {
@@ -59,6 +66,7 @@ final class NowPlaying: ObservableObject {
         album: String,
         artwork: PlatformImage? = nil
     ) {
+        dlog("[AudioDebug] NowPlaying.play album=\(album) queueCount=\(queue.count) startIndex=\(index)")
         self.queue = queue
         self.currentAlbum = album
         self.artworkImage = artwork
@@ -68,7 +76,10 @@ final class NowPlaying: ObservableObject {
     func togglePlayPause() {
         guard let p = player else { return }
         if p.isPlaying { p.pause(); isPlaying = false }
-        else           { p.play();  isPlaying = true  }
+        else           {
+            PlaybackCoordinator.shared.stopOthers(except: self)
+            p.play();  isPlaying = true
+        }
         refreshNowPlayingInfo(elapsed: p.currentTime, duration: p.duration)
     }
 
@@ -108,6 +119,7 @@ final class NowPlaying: ObservableObject {
         queue = []
         currentIndex = 0
         currentAlbum = ""
+        artworkImage = nil
         stopProgressTimer()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
@@ -115,10 +127,17 @@ final class NowPlaying: ObservableObject {
     // MARK: – Internals
 
     private func playTrack(at index: Int) {
-        guard queue.indices.contains(index) else { return }
+        guard queue.indices.contains(index) else {
+            dlog("[AudioDebug] playTrack: index \(index) out of range (queue=\(queue.count))")
+            return
+        }
+        PlaybackCoordinator.shared.stopOthers(except: self)
         let track = queue[index]
+        let exists = FileManager.default.fileExists(atPath: track.fileURL.path)
+        dlog("[AudioDebug] playTrack[\(index)] title=\(track.title) url=\(track.fileURL.path) exists=\(exists)")
         do {
             let p = try AVAudioPlayer(contentsOf: track.fileURL)
+            p.volume = volume
             p.prepareToPlay()
             let bridge = DelegateBridge { [weak self] in
                 Task { @MainActor in self?.handleTrackFinished() }
@@ -131,10 +150,11 @@ final class NowPlaying: ObservableObject {
             self.isPlaying = true
             self.currentTime = 0
             self.duration = p.duration
+            dlog("[AudioDebug] playTrack started OK duration=\(p.duration) isPlaying=\(p.isPlaying)")
             startProgressTimer()
             refreshNowPlayingInfo(elapsed: 0, duration: p.duration)
         } catch {
-            print("NowPlaying: failed to play \(track.fileURL): \(error)")
+            dlog("[AudioDebug] NowPlaying FAILED to play \(track.fileURL): \(error)")
         }
     }
 
@@ -216,5 +236,12 @@ private final class DelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(_ onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully: Bool) {
         onFinish()
+    }
+}
+
+extension NowPlaying: ExclusivePlayer {
+    /// Fully stop and close the Now Playing bar when a video / audiobook starts.
+    func stopForExclusivity() {
+        stop()
     }
 }

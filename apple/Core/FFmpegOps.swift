@@ -21,6 +21,27 @@ enum FFmpegError: Error {
 /// main thread.
 enum FFmpegOps {
 
+    /// Serial queue that absorbs the blocking `run` semaphore wait off the
+    /// main thread (and off the Swift concurrency cooperative pool). ffmpeg
+    /// sessions run one at a time to avoid concurrent-session issues.
+    private static let queue = DispatchQueue(
+        label: "com.anhobden.youtubelibrary.ffmpeg", qos: .userInitiated
+    )
+
+    /// Run a blocking `FFmpegOps`/`SilenceSplitter` closure on the dedicated
+    /// background queue, suspending (not blocking) the caller. Use this from
+    /// `@MainActor` contexts so the UI stays responsive while ffmpeg works.
+    static func runDetached<T: Sendable>(
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do { continuation.resume(returning: try work()) }
+                catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
     /// Run a raw ffmpeg command as an array of arguments (no shell
     /// tokenisation, so paths with spaces / parens / quotes are safe).
     /// Returns the captured log output (stdout + stderr).
@@ -110,14 +131,21 @@ enum FFmpegOps {
 
     /// Probe a file's duration in seconds. Implemented via ffmpeg (not
     /// ffprobe) so we don't add a second binding.
+    ///
+    /// Uses `ffmpeg -i <file>` with **no output**: ffmpeg prints the container
+    /// metadata (including the `Duration:` line) and then exits non-zero with
+    /// "At least one output file must be specified" — *without decoding any
+    /// media*. We parse the duration from that captured log. (A previous
+    /// `-f null -` form forced a full-file decode, pegging the CPU for tens of
+    /// seconds on long media.)
     static func duration(of url: URL) throws -> Double {
-        let args = ["-i", url.path, "-hide_banner", "-f", "null", "-"]
+        let args = ["-i", url.path, "-hide_banner"]
         let log: String
         do {
             log = try run(args)
         } catch let FFmpegError.nonZeroExit(_, _, captured) {
-            // ffmpeg may exit non-zero when given no output; the log still
-            // contains the Duration line we want.
+            // Expected: no output file specified. The log still contains the
+            // Duration line we want.
             log = captured
         }
         let pattern = #"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)"#
@@ -130,5 +158,35 @@ enum FFmpegOps {
             .map { Double($0) ?? 0 }
         guard parts.count == 3 else { return 0 }
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    }
+
+    // MARK: – Off-main async variants
+
+    /// Async, off-main version of `run`. Frees the calling actor while ffmpeg works.
+    @discardableResult
+    static func runAsync(_ args: [String]) async throws -> String {
+        try await runDetached { try run(args) }
+    }
+
+    /// Async, off-main version of `extractMP3`.
+    static func extractMP3Async(input: URL, output: URL) async throws {
+        try await runDetached { try extractMP3(input: input, output: output) }
+    }
+
+    /// Async, off-main version of `slice`.
+    static func sliceAsync(
+        input: URL, start: Double, end: Double, output: URL
+    ) async throws {
+        try await runDetached { try slice(input: input, start: start, end: end, output: output) }
+    }
+
+    /// Async, off-main version of `convertImage`.
+    static func convertImageAsync(input: URL, output: URL) async throws {
+        try await runDetached { try convertImage(input: input, output: output) }
+    }
+
+    /// Async, off-main version of `duration`.
+    static func durationAsync(of url: URL) async throws -> Double {
+        try await runDetached { try duration(of: url) }
     }
 }

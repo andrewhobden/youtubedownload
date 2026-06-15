@@ -6,7 +6,11 @@ struct AlbumDetailView: View {
     @EnvironmentObject var nowPlaying: NowPlaying
 
     var body: some View {
-        List {
+        ZStack {
+            AnimatedGradientBackground()
+                .ignoresSafeArea()
+
+            List {
             Section {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .top, spacing: 16) {
@@ -68,6 +72,8 @@ struct AlbumDetailView: View {
                     .buttonStyle(.plain)
                 }
             }
+            }
+            .scrollContentBackground(.hidden)
         }
         .navigationTitle(album.title)
     }
@@ -91,7 +97,15 @@ struct AlbumDetailView: View {
 
     private func playFromIndex(_ start: Int) {
         let playables = buildQueue(from: album.orderedTracks)
-        guard playables.indices.contains(start) else { return }
+        dlog("[AudioDebug] AlbumDetail.playFromIndex start=\(start) tracks=\(album.orderedTracks.count) " +
+              "playables=\(playables.count) root=\(mediaRoot.rootURL?.path ?? "nil")")
+        if let t = album.orderedTracks.first {
+            dlog("[AudioDebug] firstTrack relPath=\(t.fileRelPath) url=\(t.fileURL(in: mediaRoot)?.path ?? "nil")")
+        }
+        guard playables.indices.contains(start) else {
+            dlog("[AudioDebug] AlbumDetail.playFromIndex: no playable tracks — aborting")
+            return
+        }
         nowPlaying.play(
             queue: playables,
             startingAt: start,

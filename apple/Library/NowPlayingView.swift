@@ -19,10 +19,21 @@ struct NowPlayingBar: View {
                 HStack(spacing: 12) {
                     Button { showingFull = true } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "music.note")
-                                .font(.title3)
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(.quaternary)
                                 .frame(width: 32, height: 32)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay {
+                                    if let art = nowPlaying.artworkImage {
+                                        #if canImport(UIKit)
+                                        Image(uiImage: art).resizable().scaledToFill()
+                                        #else
+                                        Image(nsImage: art).resizable().scaledToFill()
+                                        #endif
+                                    } else {
+                                        Image(systemName: "music.note").font(.title3)
+                                    }
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(track.title)
                                     .font(.subheadline).lineLimit(1)
@@ -93,13 +104,25 @@ struct ExpandedNowPlayingView: View {
 
             Spacer()
 
-            Image(systemName: "music.note")
-                .resizable()
-                .scaledToFit()
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.quaternary)
                 .frame(width: 180, height: 180)
-                .foregroundStyle(.tertiary)
-                .padding(40)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
+                .overlay {
+                    if let art = nowPlaying.artworkImage {
+                        #if canImport(UIKit)
+                        Image(uiImage: art).resizable().scaledToFill()
+                        #else
+                        Image(nsImage: art).resizable().scaledToFill()
+                        #endif
+                    } else {
+                        Image(systemName: "music.note")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.tertiary)
+                            .padding(40)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
             VStack(spacing: 6) {
                 Text(nowPlaying.currentTrack?.title ?? "")
@@ -138,6 +161,9 @@ struct ExpandedNowPlayingView: View {
             }
             .buttonStyle(.plain)
 
+            volumeControl
+                .padding(.horizontal)
+
             Button(role: .destructive) {
                 nowPlaying.stop()
                 dismiss()
@@ -152,6 +178,18 @@ struct ExpandedNowPlayingView: View {
         }
         .padding(.horizontal)
         .presentationDragIndicator(.hidden)
+    }
+
+    private var volumeControl: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "speaker.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Slider(value: $nowPlaying.volume, in: 0...1)
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder private var scrubber: some View {

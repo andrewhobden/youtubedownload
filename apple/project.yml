@@ -13,7 +13,7 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""           # set in Xcode after first generate
+    DEVELOPMENT_TEAM: "XHFASGVDU3"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # iOS-only for v1. Catalyst is deferred until Python-Apple-support
     # ships a Catalyst slice (the XCFrameworks here are iOS device +
@@ -109,10 +109,8 @@ targets:
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.network.client: true
     postBuildScripts:
-      - name: "Stage Python lib-dynload for current slice"
+      - name: "Stage & sign Python lib-dynload for current slice"
         runOnlyWhenInstalling: false
-        outputFiles:
-          - "$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/python-stdlib/lib/python3.13/lib-dynload/.stamp"
         script: |
           set -e
           XCF="$SRCROOT/Frameworks/Python.xcframework"
@@ -133,8 +131,16 @@ targets:
           mkdir -p "$DEST"
           # Use rsync so we only copy when source changes.
           rsync -a --delete "$SRC/" "$DEST/"
-          touch "$DEST/.stamp"
-          echo "Staged lib-dynload from $SRC"
+          # Every dlopen'd .so must be code-signed for use on a real device
+          # (the simulator doesn't enforce this). Sign with the build's identity,
+          # falling back to ad-hoc ("-"). These are staged after Xcode's own
+          # CodeSign phase, so they must be signed here or the app crashes on
+          # launch with "code has to be at least ad-hoc signed".
+          IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          find "$DEST" -name "*.so" -print0 | while IFS= read -r -d '' so; do
+            codesign --force --sign "$IDENTITY" --timestamp=none "$so"
+          done
+          echo "Staged + signed lib-dynload from $SRC (identity: $IDENTITY)"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.anhobden.youtubelibrary

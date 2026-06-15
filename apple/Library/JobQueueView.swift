@@ -30,6 +30,8 @@ struct JobQueueView: View {
         case .queued: return "Queued"
         case .probing: return "Probing"
         case .downloading(let p): return String(format: "%.0f%%", p * 100)
+        case .paused(let p):
+            return p > 0 ? String(format: "Paused %.0f%%", p * 100) : "Paused"
         case .postProcessing(let stage): return stage
         case .finished: return "Done"
         case .failed(let m): return m
