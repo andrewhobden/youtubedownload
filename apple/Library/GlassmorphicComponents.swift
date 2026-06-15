@@ -277,7 +277,16 @@ struct AnimatedGradientBackground: View {
     @State private var animateGradient = false
     let colors: [Color]
     
-    init(colors: [Color] = [.blue, .purple, .pink, .orange]) {
+    /// Default palette is a dark "twilight" gradient — deep indigo → violet →
+    /// plum over a dark navy base. Rich, saturated jewel tones give it real
+    /// colour and depth while staying dark enough to be easy on the eyes (no
+    /// bright glare, no flat black).
+    init(colors: [Color] = [
+        Color(red: 0.10, green: 0.16, blue: 0.42),   // deep indigo blue
+        Color(red: 0.20, green: 0.11, blue: 0.42),   // indigo violet
+        Color(red: 0.31, green: 0.12, blue: 0.39),   // deep plum
+        Color(red: 0.05, green: 0.07, blue: 0.20)    // dark navy base
+    ]) {
         self.colors = colors
     }
     
