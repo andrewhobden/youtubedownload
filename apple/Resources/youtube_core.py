@@ -42,8 +42,22 @@ class _PauseRequested(BaseException):
 
 
 
-def _base_opts(follow_playlist: bool) -> dict:
-    return {
+def _apply_cookies(opts: dict, cookiefile: str | None) -> dict:
+    """Attach a Netscape cookie file (exported from the in-app YouTube login)
+    to ``opts`` when one is available.
+
+    The ``android`` player client ignores cookies, so once the user has signed
+    in we switch to the ``web`` client (which honours the session cookies and
+    clears YouTube's "confirm you're not a bot" gate).
+    """
+    if cookiefile and os.path.exists(cookiefile):
+        opts['cookiefile'] = cookiefile
+        opts['extractor_args'] = {'youtube': {'player_client': ['web']}}
+    return opts
+
+
+def _base_opts(follow_playlist: bool, cookiefile: str | None = None) -> dict:
+    opts = {
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
@@ -54,6 +68,7 @@ def _base_opts(follow_playlist: bool) -> dict:
         'postprocessors': [],
         'writethumbnail': False,
     }
+    return _apply_cookies(opts, cookiefile)
 
 
 def _ok_envelope(payload: dict) -> dict:
@@ -81,16 +96,20 @@ def _err_envelope(err: BaseException) -> dict:
     }
 
 
-def probe(url: str, follow_playlist: bool = False) -> dict:
+def probe(url: str, follow_playlist: bool = False, cookiefile: str = '') -> dict:
     """
     Fast metadata probe. For playlist URLs use follow_playlist=True with
     flat extraction so we don't fully resolve every entry.
+
+    ``cookiefile`` (optional) is the path to a Netscape cookie file exported by
+    the in-app YouTube login; when present it is passed to yt-dlp so signed-in
+    requests bypass YouTube's bot check.
 
     Always returns a dict with `ok` and `error` keys so Swift never sees a
     Python exception (which would crash PythonKit's non-throwing call site).
     """
     try:
-        opts = _base_opts(follow_playlist)
+        opts = _base_opts(follow_playlist, cookiefile or None)
         if follow_playlist:
             opts['extract_flat'] = 'in_playlist'
 
@@ -119,9 +138,12 @@ def probe(url: str, follow_playlist: bool = False) -> dict:
         return _err_envelope(e)
 
 
-def search(query: str, start: int, count: int) -> dict:
+def search(query: str, start: int, count: int, cookiefile: str = '') -> dict:
     """
     Flat YouTube search for items `start`..`start+count-1`.
+
+    ``cookiefile`` (optional) is forwarded to yt-dlp so search runs against a
+    signed-in session when the user has logged in.
 
     Returns a safe envelope ({ok, error, results: [...]}) so a network or
     extractor failure surfaces as data — never as a Python exception, which
@@ -139,6 +161,7 @@ def search(query: str, start: int, count: int) -> dict:
             'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
             'playlist_items': f'{start}-{end}',
         }
+        _apply_cookies(opts, cookiefile or None)
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(f'ytsearch{end}:{query}', download=False)
 
@@ -181,6 +204,7 @@ def download_raw(
     progress_cb=None,
     should_pause=None,
     baseline_paths=None,
+    cookiefile: str = '',
 ) -> dict:
     """
     Download the URL into out_dir using yt-dlp. No ffmpeg-based
@@ -195,6 +219,10 @@ def download_raw(
     FIRST attempt; pass it on resume so already-completed files (e.g. earlier
     playlist entries) are still reported in ``paths``.
 
+    ``cookiefile`` (optional) is the path to a Netscape cookie file exported by
+    the in-app YouTube login; when present yt-dlp authenticates with it so the
+    download bypasses YouTube's "confirm you're not a bot" check.
+
     Returns:
       {
         'paths': [...],          # absolute file paths produced
@@ -208,7 +236,7 @@ def download_raw(
     """
     os.makedirs(out_dir, exist_ok=True)
 
-    opts = _base_opts(follow_playlist)
+    opts = _base_opts(follow_playlist, cookiefile or None)
     opts['continuedl'] = True  # resume partial .part files after a pause
     # Download HLS/m3u8 streams with yt-dlp's native downloader instead of
     # shelling out to an ffmpeg binary (which this app doesn't bundle — it does

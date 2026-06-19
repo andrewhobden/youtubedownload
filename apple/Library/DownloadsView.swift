@@ -3,7 +3,9 @@ import SwiftUI
 /// Lists every queued / in-progress / finished download and its live status.
 struct DownloadsView: View {
     @EnvironmentObject var downloads: DownloadManager
+    @EnvironmentObject private var auth: YouTubeAuth
     @Environment(\.dismiss) private var dismiss
+    @State private var showingLogin = false
 
     var body: some View {
         NavigationStack {
@@ -23,10 +25,33 @@ struct DownloadsView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        if auth.isSignedIn {
+                            Label("Signed in to YouTube", systemImage: "checkmark.seal.fill")
+                            Button("Re-sign in") { showingLogin = true }
+                            Button("Sign out", role: .destructive) { auth.signOut() }
+                        } else {
+                            Button {
+                                showingLogin = true
+                            } label: {
+                                Label("Sign in to YouTube", systemImage: "person.crop.circle")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: auth.isSignedIn
+                              ? "person.crop.circle.badge.checkmark"
+                              : "person.crop.circle")
+                            .foregroundStyle(auth.isSignedIn ? .green : .white)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Clear Finished") { downloads.clearFinished() }
                         .disabled(!downloads.hasFinishedJobs)
                 }
+            }
+            .sheet(isPresented: $showingLogin) {
+                YouTubeLoginView()
             }
         }
     }

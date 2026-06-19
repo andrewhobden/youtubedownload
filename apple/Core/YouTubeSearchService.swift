@@ -181,7 +181,8 @@ final class YouTubeSearchService: ObservableObject {
         start: Int,
         count: Int
     ) async throws -> [YouTubeSearchResult] {
-        try await withCheckedThrowingContinuation { continuation in
+        let cookieFile = YouTubeAuth.currentCookieFilePath()
+        return try await withCheckedThrowingContinuation { continuation in
             Task.detached {
                 do {
                     let results: [YouTubeSearchResult] = try PythonBridge.shared.run { mod in
@@ -190,7 +191,7 @@ final class YouTubeSearchService: ObservableObject {
                         // pulls the new page (items `start`...`end`). The Python
                         // `search` wraps everything in try/except and returns an
                         // envelope, so a network error can never crash the app.
-                        let res = mod.search(query, start, count)
+                        let res = mod.search(query, start, count, cookiefile: cookieFile)
                         if Bool(res["ok"]) != true {
                             throw YouTubeError(message: String(res["error"]) ?? "Search failed")
                         }

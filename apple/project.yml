@@ -27,7 +27,7 @@ settings:
 packages:
   PythonKit:
     url: https://github.com/pvieito/PythonKit.git
-    branch: master
+    branch: main
 
 targets:
   YouTubeLibrary:
@@ -131,6 +131,17 @@ targets:
           mkdir -p "$DEST"
           # Use rsync so we only copy when source changes.
           rsync -a --delete "$SRC/" "$DEST/"
+          # Stage the platform-specific _sysconfigdata module next to the
+          # stdlib. The standard library's `sysconfig` (pulled in by yt-dlp at
+          # runtime) imports e.g. `_sysconfigdata__ios_arm64-iphonesimulator`,
+          # which lives per-slice in the xcframework — NOT in the shared
+          # lib/python3.13 we ship as python-stdlib. Without it, extraction
+          # fails with "No module named '_sysconfigdata__...'" (surfacing on
+          # device as an `AttributeError: 'abi_thread'`).
+          SRC_PY="$(dirname "$SRC")"
+          DEST_PY="$(dirname "$DEST")"
+          cp "$SRC_PY"/_sysconfigdata__*.py "$DEST_PY"/ 2>/dev/null \
+            || echo "warning: no _sysconfigdata module found in $SRC_PY"
           # Every dlopen'd .so must be code-signed for use on a real device
           # (the simulator doesn't enforce this). Sign with the build's identity,
           # falling back to ad-hoc ("-"). These are staged after Xcode's own

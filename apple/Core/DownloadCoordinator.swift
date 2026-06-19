@@ -396,6 +396,7 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
         // pause/resume cycle and aren't dropped from the produced list.
         let baseline = Self.existingFilePaths(in: outDir)
         let progress = ProgressHolder()
+        let cookieFile = YouTubeAuth.currentCookieFilePath()
 
         while true {
             state = .downloading(progress: progress.fraction)
@@ -415,7 +416,7 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
             let result: PythonDownloadResult
             do {
                 result = try await Task.detached(priority: .userInitiated) {
-                    [url] in
+                    [url, cookieFile] in
                     try PythonBridge.shared.run { mod in
                         // Abort the transfer when a foreground search needs the
                         // shared Python thread (read on the Python thread here).
@@ -439,7 +440,8 @@ final class DownloadCoordinator: ObservableObject, Identifiable {
                             follow_playlist: followPlaylist,
                             progress_cb: progressCb,
                             should_pause: shouldPause,
-                            baseline_paths: baseline
+                            baseline_paths: baseline,
+                            cookiefile: cookieFile
                         )
                         // youtube_core wraps every response in an envelope — any
                         // yt-dlp / network failure surfaces here as `ok: false`.

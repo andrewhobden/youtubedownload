@@ -11,9 +11,12 @@ struct YouTubeError: LocalizedError {
 enum YouTubeProbe {
 
     static func probe(_ url: URL) throws -> ProbeResult {
-        try PythonBridge.shared.run { mod in
+        let cookieFile = YouTubeAuth.currentCookieFilePath()
+        return try PythonBridge.shared.run { mod in
             let followPlaylist = Sanitize.isPlaylistOnlyURL(url.absoluteString)
-            let raw = mod.probe(url.absoluteString, follow_playlist: followPlaylist)
+            let raw = mod.probe(url.absoluteString,
+                                follow_playlist: followPlaylist,
+                                cookiefile: cookieFile)
 
             // The Python layer wraps every result in an envelope so any
             // yt-dlp exception is reported as data, not a Python exception

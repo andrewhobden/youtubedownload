@@ -16,6 +16,7 @@ struct YouTubeLibraryApp: App {
     @StateObject private var mediaRoot = MediaRoot()
     @StateObject private var nowPlaying = NowPlaying()
     @StateObject private var downloads = DownloadManager()
+    @StateObject private var youtubeAuth = YouTubeAuth.shared
 
     init() { SmokeTest.runIfRequested() }
 
@@ -26,6 +27,7 @@ struct YouTubeLibraryApp: App {
                 .environmentObject(mediaRoot)
                 .environmentObject(nowPlaying)
                 .environmentObject(downloads)
+                .environmentObject(youtubeAuth)
                 .task { try? PythonBridge.shared.bootstrap() }
         }
         .modelContainer(for: [VideoItem.self, Album.self, Track.self, Audiobook.self, Bookmark.self, Playlist.self, PlaylistItem.self, SmartPlaylist.self, UserProfile.self])
@@ -36,6 +38,7 @@ struct YouTubeLibraryApp: App {
                 .environmentObject(mediaRoot)
                 .environmentObject(nowPlaying)
                 .environmentObject(downloads)
+                .environmentObject(youtubeAuth)
                 .task { try? PythonBridge.shared.bootstrap() }
         }
         .modelContainer(for: [VideoItem.self, Album.self, Track.self, Audiobook.self, Bookmark.self, Playlist.self, PlaylistItem.self, SmartPlaylist.self, UserProfile.self])

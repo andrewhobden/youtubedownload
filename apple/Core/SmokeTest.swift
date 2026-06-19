@@ -45,13 +45,15 @@ enum SmokeTest {
         )
         print("[SmokeTest] outDir=\(tmpDir.path)")
 
+        let cookieFile = YouTubeAuth.currentCookieFilePath()
         let paths: [String] = try PythonBridge.shared.run { mod in
             let result = mod.download_raw(
                 url.absoluteString,
                 tmpDir.path,
                 audio_only: true,
                 follow_playlist: false,
-                progress_cb: Python.None
+                progress_cb: Python.None,
+                cookiefile: cookieFile
             )
             if Bool(result["ok"]) != true {
                 let msg = String(result["error"]) ?? "Unknown"

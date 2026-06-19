@@ -94,7 +94,9 @@ struct YouTubeSearchView: View {
     /// Selected secondary filter per group id (e.g. "genre", "length").
     @State private var selectedFilters: [String: SearchFilterOption] = [:]
     @State private var showingDownloads = false
+    @State private var showingLogin = false
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var auth: YouTubeAuth
     
     var body: some View {
         ZStack {
@@ -139,6 +141,9 @@ struct YouTubeSearchView: View {
         }
         .sheet(isPresented: $showingDownloads) {
             DownloadsView()
+        }
+        .sheet(isPresented: $showingLogin) {
+            YouTubeLoginView()
         }
         .onChange(of: resetToken) { resetSearch() }
     }
@@ -209,6 +214,20 @@ struct YouTubeSearchView: View {
                         )
                 )
                 
+                // Account / YouTube sign-in button
+                Button {
+                    showingLogin = true
+                    HapticFeedback.trigger(.light)
+                } label: {
+                    Image(systemName: auth.isSignedIn
+                          ? "person.crop.circle.badge.checkmark"
+                          : "person.crop.circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(auth.isSignedIn ? .green : .white)
+                        .frame(width: 44, height: 44)
+                }
+                .pressAnimation()
+
                 // Downloads button
                 Button {
                     showingDownloads = true
