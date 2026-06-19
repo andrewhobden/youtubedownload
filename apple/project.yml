@@ -1,7 +1,7 @@
 name: YouTubeLibrary
 
 options:
-  bundleIdPrefix: com.anhobden.youtubelibrary
+  bundleIdPrefix: com.bigmeandata.youtubelibrary
   deploymentTarget:
     iOS: "17.0"
     macOS: "13.0"
@@ -154,7 +154,7 @@ targets:
           echo "Staged + signed lib-dynload from $SRC (identity: $IDENTITY)"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.anhobden.youtubelibrary
+        PRODUCT_BUNDLE_IDENTIFIER: com.bigmeandata.youtubelibrary
         TARGETED_DEVICE_FAMILY: "1,2"           # iPhone + iPad
         SWIFT_OBJC_BRIDGING_HEADER: ""
         OTHER_LDFLAGS: "$(inherited) -ObjC"
